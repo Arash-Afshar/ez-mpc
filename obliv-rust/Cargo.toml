@@ -1,0 +1,17 @@
+[package]
+name = "obliv-rust"
+version = "0.1.0"
+authors = ["Arash Afshar <arash.afshar.edu@gmail.com>"]
+edition = "2018"
+
+[dependencies.scuttlebutt]
+git = "https://github.com/GaloisInc/swanky"
+
+[dependencies.ocelot]
+git = "https://github.com/GaloisInc/swanky"
+
+[dependencies.fancy-garbling]
+git = "https://github.com/GaloisInc/swanky"
+
+[dependencies.rand]
+version = "0.7"
