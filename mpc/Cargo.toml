@@ -1,0 +1,13 @@
+[package]
+name = "mpc"
+version = "0.1.0"
+authors = ["Arash Afshar <arash.afshar.edu@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+scuttlebutt = { git = "https://github.com/GaloisInc/swanky" } 
+curve25519-dalek = { version = "2", features = ["std"] }
+rand = "0.7"
+rand_core = "0.5"
