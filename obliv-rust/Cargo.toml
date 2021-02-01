@@ -1,0 +1,15 @@
+[package]
+name = "obliv-rust"
+version = "0.1.0"
+authors = ["Arash Afshar <arash.afshar.edu@gmail.com>"]
+edition = "2018"
+
+
+[dependencies]
+
+[dev-dependencies.criterion]
+version = "0.3"
+
+[[bench]]
+name = "draft"
+harness = false
