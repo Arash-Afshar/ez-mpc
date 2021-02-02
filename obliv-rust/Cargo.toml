@@ -11,5 +11,5 @@ edition = "2018"
 version = "0.3"
 
 [[bench]]
-name = "draft"
+name = "obliv_macro"
 harness = false
