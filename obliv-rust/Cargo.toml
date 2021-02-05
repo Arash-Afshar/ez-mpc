@@ -13,3 +13,15 @@ version = "0.3"
 [[bench]]
 name = "obliv_macro"
 harness = false
+
+[dependencies.scuttlebutt]                                                                               
+git = "https://github.com/GaloisInc/swanky"                                                              
+                                                                                                         
+[dependencies.ocelot]                                                                                    
+git = "https://github.com/GaloisInc/swanky"         
+                                                    
+[dependencies.fancy-garbling]                                                                            
+git = "https://github.com/GaloisInc/swanky"         
+                                                    
+[dependencies.rand]            
+version = "0.7"
