@@ -1,4 +1,5 @@
 use rand_core::{CryptoRng, RngCore};
+use std::marker::{PhantomData, Sized};
 
 #[derive(Clone)]
 pub struct Party {
@@ -22,12 +23,25 @@ pub enum Operation {
     MulU8,
 }
 
-//pub struct CircutOperation {
-//    pub input_1: WireName,
-//    pub input_2: WireName,
-//    pub output: WireName,
-//    pub op: Operation,
-//}
+pub trait GarblingMode {
+    fn pair<R: RngCore + CryptoRng>(rng: &mut R) -> (Self, Self)
+    where
+        Self: Sized;
+}
+
+pub trait Wire {
+    type ValueType;
+    fn bits() -> u32;
+}
+
+#[derive(Clone)]
+pub struct Wire8Bit {}
+impl Wire for Wire8Bit {
+    type ValueType = u8;
+    fn bits() -> u32 {
+        8
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Copy)]
 pub struct Key([u8; 32]);
@@ -46,55 +60,39 @@ pub struct PlainBit(pub u8);
 #[derive(Clone)]
 pub struct GarbledBit(pub Key);
 
-pub trait BitType<R: RngCore + CryptoRng> {
-    fn pair(rng: &mut R) -> (Self, Self)
-    where
-        Self: std::marker::Sized;
-}
-
-impl<R: RngCore + CryptoRng> BitType<R> for PlainBit {
-    fn pair(_rng: &mut R) -> (Self, Self) {
+impl GarblingMode for PlainBit {
+    fn pair<R: RngCore + CryptoRng>(_rng: &mut R) -> (Self, Self) {
         (Self(0), Self(1))
     }
 }
 
-impl<R: RngCore + CryptoRng> BitType<R> for GarbledBit {
-    fn pair(rng: &mut R) -> (Self, Self) {
+impl GarblingMode for GarbledBit {
+    fn pair<R: RngCore + CryptoRng>(rng: &mut R) -> (Self, Self) {
         (Self(Key::new(rng)), Self(Key::new(rng)))
     }
 }
 
-//#[derive(Clone)]
-//pub enum Bit {
-//    Plain(u8),
-//    Garbled(Key),
-//}
-
 #[derive(Clone)]
-pub struct GarblingWire<Bit> {
-    pub bits: Vec<(Bit, Bit)>,
+pub struct GarblingWire<M: GarblingMode, W: Wire> {
+    pub bits: Vec<(M, M)>,
+    wire_info: PhantomData<W>,
 }
 
-impl<T> GarblingWire<T> {
-    fn new<S: BitSize, R: RngCore + CryptoRng>(rng: &mut R) -> GarblingWire<T>
-    where
-        T: BitType<R>,
-    {
+impl<M: GarblingMode, W: Wire> GarblingWire<M, W> {
+    fn new<R: RngCore + CryptoRng>(rng: &mut R) -> GarblingWire<M, W> {
         GarblingWire {
-            bits: (0..S::bits())
+            wire_info: PhantomData,
+            bits: (0..W::bits())
                 .into_iter()
-                .map(|_| T::pair(rng))
-                .collect::<Vec<(T, T)>>(),
+                .map(|_| M::pair(rng))
+                .collect::<Vec<(M, M)>>(),
         }
     }
 
-    /// TODO: change the type of value to S
-    pub fn encode<S>(self, value: u8) -> EvaluatingWire<T>
-    where
-        S: BitSize,
-    {
-        let mask = 2u8.pow(S::bits() - 1);
-        let bit_value = (0..S::bits())
+    /// TODO: change the type of value W::ValueType
+    pub fn encode(self, value: u8) -> EvaluatingWire<M> {
+        let mask = 2u8.pow(W::bits() - 1);
+        let bit_value = (0..W::bits())
             .into_iter()
             .map(|index| (value & (mask >> index)) == 0)
             .collect::<Vec<bool>>();
@@ -104,7 +102,7 @@ impl<T> GarblingWire<T> {
                 .into_iter()
                 .zip(bit_value)
                 .map(|((zero, one), choice)| if choice { zero } else { one })
-                .collect::<Vec<T>>(),
+                .collect::<Vec<M>>(),
         }
     }
 }
@@ -118,51 +116,56 @@ fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
             (acc + 2u8.pow(idx) * p_bit.0, idx + 1)
         })
         .0
-    //.fold(0, |acc, p_bit| acc * 2 + p_bit.0)
-}
-
-pub trait BitSize {
-    fn bits() -> u32;
-}
-
-impl BitSize for u8 {
-    fn bits() -> u32 {
-        8
-    }
 }
 
 #[derive(Clone)]
-pub struct EvaluatingWire<Bit> {
-    pub bits: Vec<Bit>,
+pub struct EvaluatingWire<M: GarblingMode> {
+    pub bits: Vec<M>,
 }
 
+//#[derive(Clone)]
+//pub struct PlainGate {
+//    output: GarblingWire<PlainBit, Wire8Bit>,
+//}
+
 #[derive(Clone)]
-pub struct PlainGate {
-    output: GarblingWire<PlainBit>,
+pub struct Gate<M: GarblingMode, W: Wire> {
+    pub output: GarblingWire<M, W>,
 }
-pub struct GarbledGateZZZ {}
 
 fn garble_add_u8_plain_scheme(
-    input_1: GarblingWire<PlainBit>,
-    input_2: GarblingWire<PlainBit>,
-) -> (GarblingWire<PlainBit>, Vec<PlainGate>) {
+    input_1: GarblingWire<PlainBit, Wire8Bit>,
+    input_2: GarblingWire<PlainBit, Wire8Bit>,
+) -> (
+    GarblingWire<PlainBit, Wire8Bit>,
+    Vec<Gate<PlainBit, Wire8Bit>>,
+) {
     // Plain wires are always 0 and 1 so it does not matter whether we generate a new output or
     // reuse input.
-    (input_1.clone(), vec![PlainGate { output: input_1 }])
+    (
+        input_1.clone(),
+        vec![Gate::<PlainBit, Wire8Bit> { output: input_1 }],
+    )
 }
 
 fn garble_mul_u8_plain_scheme(
-    input_1: GarblingWire<PlainBit>,
-    input_2: GarblingWire<PlainBit>,
-) -> (GarblingWire<PlainBit>, Vec<PlainGate>) {
+    input_1: GarblingWire<PlainBit, Wire8Bit>,
+    input_2: GarblingWire<PlainBit, Wire8Bit>,
+) -> (
+    GarblingWire<PlainBit, Wire8Bit>,
+    Vec<Gate<PlainBit, Wire8Bit>>,
+) {
     (input_1, vec![])
 }
 
 pub fn garble_u8_gate_plain(
-    input_1: GarblingWire<PlainBit>,
-    input_2: GarblingWire<PlainBit>,
+    input_1: GarblingWire<PlainBit, Wire8Bit>,
+    input_2: GarblingWire<PlainBit, Wire8Bit>,
     operation: Operation,
-) -> (GarblingWire<PlainBit>, Vec<PlainGate>) {
+) -> (
+    GarblingWire<PlainBit, Wire8Bit>,
+    Vec<Gate<PlainBit, Wire8Bit>>,
+) {
     // use another macro to generate the gates
     match operation {
         Operation::AddU8 => garble_add_u8_plain_scheme(input_1, input_2),
@@ -173,16 +176,16 @@ pub fn garble_u8_gate_plain(
 fn evaluate_add_u8_plain_scheme(
     input_1: EvaluatingWire<PlainBit>,
     input_2: EvaluatingWire<PlainBit>,
-    gates: Vec<PlainGate>,
+    gates: Vec<Gate<PlainBit, Wire8Bit>>,
 ) -> EvaluatingWire<PlainBit> {
     let sum = to_u8(&input_1) + to_u8(&input_2);
-    gates[0].clone().output.encode::<u8>(sum)
+    gates[0].clone().output.encode(sum)
 }
 
 fn evaluate_mul_u8_plain_scheme(
     input_1: EvaluatingWire<PlainBit>,
     input_2: EvaluatingWire<PlainBit>,
-    gates: Vec<PlainGate>,
+    gates: Vec<Gate<PlainBit, Wire8Bit>>,
 ) -> EvaluatingWire<PlainBit> {
     input_1
 }
@@ -191,7 +194,7 @@ pub fn evaluate_plain(
     input_1: EvaluatingWire<PlainBit>,
     input_2: EvaluatingWire<PlainBit>,
     operation: Operation,
-    gates: Vec<PlainGate>,
+    gates: Vec<Gate<PlainBit, Wire8Bit>>,
 ) -> EvaluatingWire<PlainBit> {
     // use another macro to generate the gates
     match operation {
@@ -216,8 +219,8 @@ mod tests {
     fn test_plain_garbling() {
         let mut rng = StdRng::from_seed(SEED);
 
-        let garbled_wires = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
-        let garbled_value = garbled_wires.encode::<u8>(6);
+        let garbled_wires = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+        let garbled_value = garbled_wires.encode(6);
         let expect = vec![0, 0, 0, 0, 0, 1, 1, 0];
         let got = garbled_value
             .bits
@@ -231,8 +234,8 @@ mod tests {
     fn test_plain_decode_to_u8() {
         let mut rng = StdRng::from_seed(SEED);
 
-        let garbled_wires = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
-        let garbled_value = garbled_wires.encode::<u8>(6);
+        let garbled_wires = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+        let garbled_value = garbled_wires.encode(6);
         let got = to_u8(&garbled_value);
         assert_eq!(6, got);
     }
@@ -241,10 +244,10 @@ mod tests {
     fn test_plain_add_u8() {
         let mut rng = StdRng::from_seed(SEED);
 
-        let garbled_wires_1 = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
-        let garbled_value_1 = garbled_wires_1.clone().encode::<u8>(6);
-        let garbled_wires_2 = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
-        let garbled_value_2 = garbled_wires_2.clone().encode::<u8>(6);
+        let garbled_wires_1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+        let garbled_value_1 = garbled_wires_1.clone().encode(6);
+        let garbled_wires_2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+        let garbled_value_2 = garbled_wires_2.clone().encode(6);
         let (_, gates) = garble_add_u8_plain_scheme(garbled_wires_1, garbled_wires_2);
         let result = evaluate_add_u8_plain_scheme(garbled_value_1, garbled_value_2, gates);
 
@@ -256,8 +259,8 @@ mod tests {
     fn test_non_plain_garbling() {
         let mut rng = StdRng::from_seed(SEED);
 
-        let garbled_wires = GarblingWire::<GarbledBit>::new::<u8, _>(&mut rng);
-        let garbled_value = garbled_wires.clone().encode::<u8>(6);
+        let garbled_wires = GarblingWire::<GarbledBit, Wire8Bit>::new(&mut rng);
+        let garbled_value = garbled_wires.clone().encode(6);
         let expect = vec![
             garbled_wires.clone().bits[0].0 .0,
             garbled_wires.clone().bits[1].0 .0,
@@ -299,21 +302,21 @@ mod tests {
             };
 
             // assign!(a1 <- party 1, value 100);
-            let a1 = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
-            let garbled_value_a1 = a1.clone().encode::<u8>(100);
+            let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let garbled_value_a1 = a1.clone().encode(100);
             // TODO serialize and send garbled value
 
             // assign!(a2 <- party 1, value 200);
-            let a2 = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
-            let garbled_value_a2 = a2.clone().encode::<u8>(200);
+            let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let garbled_value_a2 = a2.clone().encode(200);
             // TODO serialize and send garbled value
 
             // assign!(b1 <- party 2);
-            let b1 = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
+            let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
             // TODO run OT
 
             // assign!(b2 <- party 2);
-            let b2 = GarblingWire::<PlainBit>::new::<u8, _>(&mut rng);
+            let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
             // TODO run OT
 
             // -------------------------- Proceed to garbling deeper layers next.
@@ -366,16 +369,16 @@ mod tests {
 
         // obliv!(c = a1 + b1);
         // TODO receive(gates);
-        let gates: Vec<PlainGate> = vec![];
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
         let c = evaluate_plain(a1, b1, Operation::AddU8, gates);
 
         // obliv!(d = a2 + b2);
         // TODO receive(gates);
-        let gates: Vec<PlainGate> = vec![];
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
         let d = evaluate_plain(a2, b2, Operation::AddU8, gates);
 
         // obliv!(e = c * d);
-        let gates: Vec<PlainGate> = vec![];
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
         let e = evaluate_plain(c, d, Operation::MulU8, gates);
         // TODO receive(gates);
 
