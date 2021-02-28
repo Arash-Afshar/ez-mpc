@@ -420,6 +420,7 @@ dependencies = [
  "fancy-garbling",
  "ocelot",
  "rand",
+ "rand_core",
  "scuttlebutt",
 ]
 

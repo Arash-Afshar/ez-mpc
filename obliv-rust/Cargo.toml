@@ -14,14 +14,17 @@ version = "0.3"
 name = "obliv_macro"
 harness = false
 
-[dependencies.scuttlebutt]                                                                               
-git = "https://github.com/GaloisInc/swanky"                                                              
+[dependencies.scuttlebutt]
+git = "https://github.com/GaloisInc/swanky"
                                                                                                          
-[dependencies.ocelot]                                                                                    
-git = "https://github.com/GaloisInc/swanky"         
+[dependencies.ocelot]
+git = "https://github.com/GaloisInc/swanky"
                                                     
-[dependencies.fancy-garbling]                                                                            
-git = "https://github.com/GaloisInc/swanky"         
-                                                    
-[dependencies.rand]            
+[dependencies.fancy-garbling]
+git = "https://github.com/GaloisInc/swanky"
+
+[dependencies.rand_core]
+version = "0.5"
+
+[dependencies.rand]
 version = "0.7"
