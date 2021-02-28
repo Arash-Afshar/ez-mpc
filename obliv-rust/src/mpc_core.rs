@@ -1,4 +1,5 @@
 use rand_core::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 use std::marker::{PhantomData, Sized};
 
 #[derive(Clone)]
@@ -36,6 +37,7 @@ pub trait Wire {
 
 #[derive(Clone)]
 pub struct Wire8Bit {}
+
 impl Wire for Wire8Bit {
     type ValueType = u8;
     fn bits() -> u32 {
@@ -43,7 +45,7 @@ impl Wire for Wire8Bit {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Copy)]
+#[derive(Clone, Debug, Eq, PartialEq, Copy, Serialize, Deserialize)]
 pub struct Key([u8; 32]);
 
 impl Key {
@@ -54,10 +56,10 @@ impl Key {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PlainBit(pub u8);
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct GarbledBit(pub Key);
 
 impl GarblingMode for PlainBit {
@@ -72,14 +74,14 @@ impl GarblingMode for GarbledBit {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct GarblingWire<M: GarblingMode, W: Wire> {
     pub bits: Vec<(M, M)>,
     wire_info: PhantomData<W>,
 }
 
 impl<M: GarblingMode, W: Wire> GarblingWire<M, W> {
-    fn new<R: RngCore + CryptoRng>(rng: &mut R) -> GarblingWire<M, W> {
+    pub fn new<R: RngCore + CryptoRng>(rng: &mut R) -> GarblingWire<M, W> {
         GarblingWire {
             wire_info: PhantomData,
             bits: (0..W::bits())
@@ -118,7 +120,7 @@ fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
         .0
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EvaluatingWire<M: GarblingMode> {
     pub bits: Vec<M>,
 }
@@ -255,6 +257,7 @@ mod tests {
 
         assert_eq!(12, got);
     }
+
     #[test]
     fn test_non_plain_garbling() {
         let mut rng = StdRng::from_seed(SEED);
@@ -277,6 +280,40 @@ mod tests {
             .map(|g_bit| g_bit.0)
             .collect::<Vec<Key>>();
         assert_eq!(expect, got);
+    }
+
+    #[test]
+    fn test_serde_garbled_wires() {
+        let mut rng = StdRng::from_seed(SEED);
+
+        let garbled_wires = GarblingWire::<GarbledBit, Wire8Bit>::new(&mut rng);
+        let serialized_garbled_wires = serde_json::to_vec(&garbled_wires).unwrap();
+        let deserialized_garbled_wires: GarblingWire<GarbledBit, Wire8Bit> =
+            serde_json::from_slice(&serialized_garbled_wires).unwrap();
+
+        assert!(garbled_wires
+            .clone()
+            .bits
+            .into_iter()
+            .zip(deserialized_garbled_wires.bits)
+            .fold(true, |acc, (want, got)| acc || (want.0 == got.0)));
+    }
+
+    #[test]
+    fn test_serde_eval_wires() {
+        let mut rng = StdRng::from_seed(SEED);
+
+        let garbled_wires = GarblingWire::<GarbledBit, Wire8Bit>::new(&mut rng);
+        let garbled_value = garbled_wires.encode(6);
+        let serialized_garbled_value = serde_json::to_vec(&garbled_value).unwrap();
+        let deserialized_garbled_value: EvaluatingWire<GarbledBit> =
+            serde_json::from_slice(&serialized_garbled_value).unwrap();
+        assert!(garbled_value
+            .clone()
+            .bits
+            .into_iter()
+            .zip(deserialized_garbled_value.bits)
+            .fold(true, |acc, (want, got)| acc || (want.0 == got.0)));
     }
 
     #[test]
