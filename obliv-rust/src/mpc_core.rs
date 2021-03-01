@@ -35,7 +35,7 @@ pub trait Wire {
     fn bits() -> u32;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Wire8Bit {}
 
 impl Wire for Wire8Bit {
@@ -56,7 +56,7 @@ impl Key {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PlainBit(pub u8);
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
@@ -130,7 +130,7 @@ pub struct EvaluatingWire<M: GarblingMode> {
 //    output: GarblingWire<PlainBit, Wire8Bit>,
 //}
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Gate<M: GarblingMode, W: Wire> {
     pub output: GarblingWire<M, W>,
 }
@@ -317,6 +317,48 @@ mod tests {
     }
 
     #[test]
+    fn test_serde_garbled_gate() {
+        let mut rng = StdRng::from_seed(SEED);
+
+        let garbled_wires = GarblingWire::<GarbledBit, Wire8Bit>::new(&mut rng);
+        let gate = Gate::<GarbledBit, Wire8Bit> {
+            output: garbled_wires,
+        };
+
+        let serialized_gate = serde_json::to_vec(&gate).unwrap();
+        let deserialized_gate: Gate<GarbledBit, Wire8Bit> =
+            serde_json::from_slice(&serialized_gate).unwrap();
+        assert!(gate
+            .clone()
+            .output
+            .bits
+            .into_iter()
+            .zip(deserialized_gate.output.bits)
+            .fold(true, |acc, (want, got)| acc || (want.0 == got.0)));
+    }
+
+    #[test]
+    fn test_serde_plain_gate() {
+        let mut rng = StdRng::from_seed(SEED);
+
+        let garbled_wires = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+        let gate = Gate::<PlainBit, Wire8Bit> {
+            output: garbled_wires,
+        };
+
+        let serialized_gate = serde_json::to_vec(&gate).unwrap();
+        let deserialized_gate: Gate<PlainBit, Wire8Bit> =
+            serde_json::from_slice(&serialized_gate).unwrap();
+        assert!(gate
+            .clone()
+            .output
+            .bits
+            .into_iter()
+            .zip(deserialized_gate.output.bits)
+            .fold(true, |acc, (want, got)| acc || (want.0 == got.0)));
+    }
+
+    #[test]
     fn test_pipe_send_vec_u8() {
         // network setup
         let message: Vec<u8> = vec![0x01, 0x02, 0x03, 0x04, 0x05];
@@ -340,8 +382,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn plain_circuit() {
+    fn plain_circuit_without_ot() {
         // network setup
         let (sender, receiver) = UnixStream::pair().unwrap();
         let handle = std::thread::spawn(move || {
@@ -364,38 +405,26 @@ mod tests {
             // assign!(a1 <- party 1, value 100);
             let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
             let garbled_value_a1 = a1.clone().encode(100);
-            // TODO serialize and send garbled value
+            let ser = serde_json::to_vec(&garbled_value_a1).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
 
             // assign!(a2 <- party 1, value 200);
             let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            let garbled_value_a2 = a2.clone().encode(200);
-            // TODO serialize and send garbled value
+            let garbled_value_a2 = a2.clone().encode(50);
+            let ser = serde_json::to_vec(&garbled_value_a2).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
 
-            // assign!(b1 <- party 2);
-            let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            // TODO run OT
+            // obliv!(g = a1 + a2);
+            let (_, gates) = garble_u8_gate_plain(a1, a2, Operation::AddU8);
+            let ser = serde_json::to_vec(&gates).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
 
-            // assign!(b2 <- party 2);
-            let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            // TODO run OT
-
-            // -------------------------- Proceed to garbling deeper layers next.
-
-            // obliv!(c = a1 + b1);
-            let (c, gates) = garble_u8_gate_plain(a1, b1, Operation::AddU8);
-            // TODO send(gates);
-
-            // obliv!(d = a2 + b2);
-            let (d, gates) = garble_u8_gate_plain(a2, b2, Operation::AddU8);
-            // TODO send(gates);
-
-            // obliv!(e = c * d);
-            let (e, gates) = garble_u8_gate_plain(c, d, Operation::MulU8);
-            // TODO send(gates);
-
-            // reveal!(e);
-            // TODO send(gates.mapping);
-            // TODO receive(plain_e);
+            // reveal!(g);
+            // TODO: send decoding
+            // TODO: receive the plain value
         });
 
         // Evaluator
@@ -412,41 +441,25 @@ mod tests {
             role: Role::Evaluator,
         };
         // assign!(a1 <- party 1);
-        // TODO receive the garbled value
-        let a1 = EvaluatingWire { bits: vec![] };
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let a1: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
 
         // assign!(a2 <- party 1);
-        // TODO receive the garbled value
-        let a2 = EvaluatingWire { bits: vec![] };
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let a2: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
 
-        // assign!(b1 <- party 2, value 300);
-        // TODO run OT and receive the garbled value
-        let b1 = EvaluatingWire { bits: vec![] };
+        // obliv!(g = a1 + a2);
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = serde_json::from_slice(&ser).unwrap();
+        let g = evaluate_plain(a1, a2, Operation::AddU8, gates);
 
-        // assign!(b2 <- party 2, value 400);
-        // TODO run OT and receive the garbled value
-        let b2 = EvaluatingWire { bits: vec![] };
-
-        // obliv!(c = a1 + b1);
-        // TODO receive(gates);
-        let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
-        let c = evaluate_plain(a1, b1, Operation::AddU8, gates);
-
-        // obliv!(d = a2 + b2);
-        // TODO receive(gates);
-        let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
-        let d = evaluate_plain(a2, b2, Operation::AddU8, gates);
-
-        // obliv!(e = c * d);
-        let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
-        let e = evaluate_plain(c, d, Operation::MulU8, gates);
-        // TODO receive(gates);
-
-        // reveal!(e);
-        // TODO send(gates.mapping);
-        // TODO receive(plain_e);
-
-        // -------------------------- Proceed to garbling deeper layers next.
+        // reveal!(g);
+        // TODO receive decoding and decode.
+        let plain_g = to_u8(&g);
+        assert_eq!(plain_g, 150);
 
         handle.join().unwrap();
         println!(
@@ -457,51 +470,128 @@ mod tests {
             "Receiver communication (write): {:.2} Mb",
             channel.kilobits_written() / 1000.0
         );
+    }
 
-        //let alice = Party { id: 1 };
-        //let bob = Party { id: 1 };
+    #[test]
+    fn plain_circuit_with_ot() {
+        // network setup
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        let handle = std::thread::spawn(move || {
+            let mut rng = StdRng::from_seed(SEED);
 
-        //let protocol = Protocol {
-        //    parties: vec![alice.clone(), bob],
-        //    me: alice,
-        //    role: Role::Garbler,
-        //};
-        //// alice's input: a1, a2
-        //// bob's   input: b1, b2
-        //// function: ( a1 + b1 ) * (a2 + b2)
+            // Garbler
+            let reader = BufReader::new(sender.try_clone().unwrap());
+            let writer = BufWriter::new(sender);
+            let mut channel = TrackChannel::new(reader, writer);
+            let _ = channel.write_usize(6).unwrap();
+            // ------------------ Start of the Garbler
+            let alice = Party { id: 1 };
+            let bob = Party { id: 2 };
+            let protocol = Protocol {
+                parties: vec![alice.clone(), bob],
+                me: alice,
+                role: Role::Garbler,
+            };
 
-        //// obliv!(c = a + b) -> based on the role, do the garbling or evaluating
-        //// reveal!(c)
-        //// assign!(a <- party 1, value)
+            // assign!(a1 <- party 1, value 100);
+            let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let garbled_value_a1 = a1.clone().encode(100);
+            let ser = serde_json::to_vec(&garbled_value_a1).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
 
-        //let a1 = GarblingWire { bits: vec![] };
-        //let a2 = GarblingWire { bits: vec![] };
-        //let b1 = GarblingWire { bits: vec![] };
-        //let b2 = GarblingWire { bits: vec![] };
+            // assign!(a2 <- party 1, value 200);
+            let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let garbled_value_a2 = a2.clone().encode(50);
+            let ser = serde_json::to_vec(&garbled_value_a2).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
 
-        //// assign!(a1 <- party 1, 10);
-        //// assign!(a2 <- party 1, 20);
-        //// assign!(b1 <- party 2, 30);
-        //// assign!(b2 <- party 2, 40);
+            // TODO: After OT: // assign!(b1 <- party 2);
+            // TODO: After OT: let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            // TODO: After OT: // TODO run OT
 
-        //// obliv!(c = a1 + b1) as garbler
-        //let (c, gates) = garble(a1, b1, Operation::AddU32);
-        //send(gates);
+            // TODO: After OT: // assign!(b2 <- party 2);
+            // TODO: After OT: let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            // TODO: After OT: // TODO run OT
 
-        //// obliv!(c = a1 + b1) as evaluator
-        //let gates = receive();
-        //let c = evaluate(a1, b1, gates);
+            // TODO: After OT: // -------------------------- Proceed to garbling deeper layers next.
 
-        //// obliv!(d = a2 + b2);
-        //// obliv!(e = c + d);
+            // TODO: After OT: // obliv!(c = a1 + b1);
+            // TODO: After OT: let (c, gates) = garble_u8_gate_plain(a1, b1, Operation::AddU8);
+            // TODO: After OT: // TODO send(gates);
 
-        //// reveal!(e) as garbler
-        //send(e.mapping);
-        //let plain_e = receive();
+            // TODO: After OT: // obliv!(d = a2 + b2);
+            // TODO: After OT: let (d, gates) = garble_u8_gate_plain(a2, b2, Operation::AddU8);
+            // TODO: After OT: // TODO send(gates);
 
-        //// reveal!(e) as evaluator
-        //let mapping = receive();
-        //let plain_e = decode(e, mapping);
-        //send(plain_e);
+            // TODO: After OT: // obliv!(e = c * d);
+            // TODO: After OT: let (e, gates) = garble_u8_gate_plain(c, d, Operation::MulU8);
+            // TODO: After OT: // TODO send(gates);
+
+            // TODO: After OT: // reveal!(e);
+            // TODO: After OT: // TODO send(gates.mapping);
+            // TODO: After OT: // TODO receive(plain_e);
+        });
+
+        // Evaluator
+        let reader = BufReader::new(receiver.try_clone().unwrap());
+        let writer = BufWriter::new(receiver);
+        let mut channel = TrackChannel::new(reader, writer);
+        println!("-------------- Received: {}", channel.read_usize().unwrap());
+        // ------------------ Start of evaluator
+        let alice = Party { id: 1 };
+        let bob = Party { id: 2 };
+        let protocol = Protocol {
+            parties: vec![alice, bob.clone()],
+            me: bob,
+            role: Role::Evaluator,
+        };
+        // assign!(a1 <- party 1);
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let a1: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
+
+        // assign!(a2 <- party 1);
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let a2: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
+
+        // TODO: After OT: // assign!(b1 <- party 2, value 300);
+        // TODO: After OT: // TODO run OT and receive the garbled value
+        // TODO: After OT: let b1 = EvaluatingWire { bits: vec![] };
+
+        // TODO: After OT: // assign!(b2 <- party 2, value 400);
+        // TODO: After OT: // TODO run OT and receive the garbled value
+        // TODO: After OT: let b2 = EvaluatingWire { bits: vec![] };
+
+        // TODO: After OT: // obliv!(c = a1 + b1);
+        // TODO: After OT: // TODO receive(gates);
+        // TODO: After OT: let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
+        // TODO: After OT: let c = evaluate_plain(a1, b1, Operation::AddU8, gates);
+
+        // TODO: After OT: // obliv!(d = a2 + b2);
+        // TODO: After OT: // TODO receive(gates);
+        // TODO: After OT: let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
+        // TODO: After OT: let d = evaluate_plain(a2, b2, Operation::AddU8, gates);
+
+        // TODO: After OT: // obliv!(e = c * d);
+        // TODO: After OT: let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
+        // TODO: After OT: let e = evaluate_plain(c, d, Operation::MulU8, gates);
+        // TODO: After OT: // TODO receive(gates);
+
+        // TODO: After OT: // reveal!(e);
+        // TODO: After OT: // TODO send(gates.mapping);
+        // TODO: After OT: // TODO receive(plain_e);
+
+        handle.join().unwrap();
+        println!(
+            "Receiver communication (read): {:.2} Mb",
+            channel.kilobits_read() / 1000.0
+        );
+        println!(
+            "Receiver communication (write): {:.2} Mb",
+            channel.kilobits_written() / 1000.0
+        );
     }
 }
