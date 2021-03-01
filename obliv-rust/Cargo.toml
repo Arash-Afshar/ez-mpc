@@ -11,5 +11,28 @@ edition = "2018"
 version = "0.3"
 
 [[bench]]
-name = "draft"
+name = "obliv_macro"
 harness = false
+
+[dependencies.scuttlebutt]
+git = "https://github.com/GaloisInc/swanky"
+features = ["serde1"]
+                                                                                                         
+[dependencies.ocelot]
+git = "https://github.com/GaloisInc/swanky"
+                                                    
+[dependencies.fancy-garbling]
+git = "https://github.com/GaloisInc/swanky"
+
+[dependencies.rand_core]
+version = "0.5"
+
+[dependencies.rand]
+version = "0.7"
+
+[dependencies.serde]
+version = "1.0.105"
+features = ["derive"]
+
+[dependencies.bincode]
+version = "1.3.2"
