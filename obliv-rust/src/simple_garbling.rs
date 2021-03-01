@@ -1,8 +1,13 @@
+//! Implements a test garbling scheme. It is used only for the purpose of identitfiyng proper API.
+//! Once the API is stable, this will be removed and replaced with a fast and secure garabling
+//! scheme.
+
 use crate::mpc_core::GarblingMode;
 use rand_core::{CryptoRng, RngCore};
 use scuttlebutt::Block;
 use serde::{Deserialize, Serialize};
 
+/// A garbled bit where the zero-key and one-key are generated randomly.
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct GarbledBit(pub Block);
 
@@ -27,7 +32,10 @@ impl GarblingMode for GarbledBit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mpc_core::{EvaluatingWire, GarblingWire, Gate, Wire8Bit};
+    use crate::{
+        mpc_core::{EvaluatingWire, GarblingWire, Gate},
+        wires::Wire8Bit,
+    };
     use rand::{rngs::StdRng, SeedableRng};
     use scuttlebutt::{AbstractChannel, Block, TrackChannel};
     use std::{

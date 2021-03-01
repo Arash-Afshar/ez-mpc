@@ -1,8 +1,18 @@
-use crate::mpc_core::{EvaluatingWire, GarblingMode, GarblingWire, Gate, Operation, Wire8Bit};
+//! Implements the Plain (insecure) garbling mode that can be used for debug purposes.
+
+use crate::{
+    mpc_core::{EvaluatingWire, GarblingMode, GarblingWire, Gate, Operation},
+    wires::Wire8Bit,
+};
 use rand_core::{CryptoRng, RngCore};
 use scuttlebutt::Block;
 use serde::{Deserialize, Serialize};
 
+// ----------------------------------------------------------------------------------------------
+//                              Type Definion and Impl Blocks                                   -
+// ----------------------------------------------------------------------------------------------
+
+/// Implements a plain key where the zero-key is always 0 and the one-key is always 1.
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PlainBit(pub Block);
 
@@ -16,42 +26,9 @@ impl GarblingMode for PlainBit {
     }
 }
 
-fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
-    garbled_value
-        .bits
-        .iter()
-        .rev()
-        .fold((0, 0), |(acc, idx), p_bit| {
-            let bit = if p_bit.0 == Block::default() { 0 } else { 1 };
-            (acc + 2u8.pow(idx) * bit, idx + 1)
-        })
-        .0
-}
-
-pub fn garble_add_u8_plain_scheme(
-    input_1: GarblingWire<PlainBit, Wire8Bit>,
-    _input_2: GarblingWire<PlainBit, Wire8Bit>,
-) -> (
-    GarblingWire<PlainBit, Wire8Bit>,
-    Vec<Gate<PlainBit, Wire8Bit>>,
-) {
-    // Plain wires are always 0 and 1 so it does not matter whether we generate a new output or
-    // reuse input.
-    (
-        input_1.clone(),
-        vec![Gate::<PlainBit, Wire8Bit> { output: input_1 }],
-    )
-}
-
-pub fn garble_mul_u8_plain_scheme(
-    input_1: GarblingWire<PlainBit, Wire8Bit>,
-    _input_2: GarblingWire<PlainBit, Wire8Bit>,
-) -> (
-    GarblingWire<PlainBit, Wire8Bit>,
-    Vec<Gate<PlainBit, Wire8Bit>>,
-) {
-    (input_1, vec![])
-}
+// ----------------------------------------------------------------------------------------------
+//                              Garble and Evaluate Operations                                  -
+// ----------------------------------------------------------------------------------------------
 
 pub fn garble_u8_gate_plain(
     input_1: GarblingWire<PlainBit, Wire8Bit>,
@@ -68,23 +45,6 @@ pub fn garble_u8_gate_plain(
     }
 }
 
-pub fn evaluate_add_u8_plain_scheme(
-    input_1: EvaluatingWire<PlainBit>,
-    input_2: EvaluatingWire<PlainBit>,
-    gates: Vec<Gate<PlainBit, Wire8Bit>>,
-) -> EvaluatingWire<PlainBit> {
-    let sum = to_u8(&input_1) + to_u8(&input_2);
-    gates[0].clone().output.encode(sum)
-}
-
-pub fn evaluate_mul_u8_plain_scheme(
-    input_1: EvaluatingWire<PlainBit>,
-    _input_2: EvaluatingWire<PlainBit>,
-    _gates: Vec<Gate<PlainBit, Wire8Bit>>,
-) -> EvaluatingWire<PlainBit> {
-    input_1
-}
-
 pub fn evaluate_plain(
     input_1: EvaluatingWire<PlainBit>,
     input_2: EvaluatingWire<PlainBit>,
@@ -98,11 +58,69 @@ pub fn evaluate_plain(
     }
 }
 
+// ----------------------------------------------------------------------------------------------
+//                                   Internal Functions                                         -
+// ----------------------------------------------------------------------------------------------
+
+fn garble_add_u8_plain_scheme(
+    input_1: GarblingWire<PlainBit, Wire8Bit>,
+    _input_2: GarblingWire<PlainBit, Wire8Bit>,
+) -> (
+    GarblingWire<PlainBit, Wire8Bit>,
+    Vec<Gate<PlainBit, Wire8Bit>>,
+) {
+    // Plain wires are always 0 and 1 so it does not matter whether we generate a new output or
+    // reuse input.
+    (
+        input_1.clone(),
+        vec![Gate::<PlainBit, Wire8Bit> { output: input_1 }],
+    )
+}
+
+fn garble_mul_u8_plain_scheme(
+    input_1: GarblingWire<PlainBit, Wire8Bit>,
+    _input_2: GarblingWire<PlainBit, Wire8Bit>,
+) -> (
+    GarblingWire<PlainBit, Wire8Bit>,
+    Vec<Gate<PlainBit, Wire8Bit>>,
+) {
+    (input_1, vec![])
+}
+
+fn evaluate_add_u8_plain_scheme(
+    input_1: EvaluatingWire<PlainBit>,
+    input_2: EvaluatingWire<PlainBit>,
+    gates: Vec<Gate<PlainBit, Wire8Bit>>,
+) -> EvaluatingWire<PlainBit> {
+    let sum = to_u8(&input_1) + to_u8(&input_2);
+    gates[0].clone().output.encode(sum)
+}
+
+fn evaluate_mul_u8_plain_scheme(
+    input_1: EvaluatingWire<PlainBit>,
+    _input_2: EvaluatingWire<PlainBit>,
+    _gates: Vec<Gate<PlainBit, Wire8Bit>>,
+) -> EvaluatingWire<PlainBit> {
+    input_1
+}
+
+fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
+    garbled_value
+        .bits
+        .iter()
+        .rev()
+        .fold((0, 0), |(acc, idx), p_bit| {
+            let bit = if p_bit.0 == Block::default() { 0 } else { 1 };
+            (acc + 2u8.pow(idx) * bit, idx + 1)
+        })
+        .0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mpc_core::{
-        to_bit_arr, EvaluatingWire, GarblingWire, Gate, Operation, Party, Protocol, Role, Wire8Bit,
+        to_bit_arr, EvaluatingWire, GarblingWire, Gate, Operation, Party, Protocol, Role,
     };
     use ocelot::ot::{ChouOrlandiReceiver, ChouOrlandiSender, Receiver, Sender};
     use rand::{rngs::StdRng, SeedableRng};
