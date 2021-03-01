@@ -317,6 +317,29 @@ mod tests {
     }
 
     #[test]
+    fn test_pipe_send_vec_u8() {
+        // network setup
+        let message: Vec<u8> = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let message_clone = message.clone();
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        let handle = std::thread::spawn(move || {
+            // Garbler
+            let reader = BufReader::new(sender.try_clone().unwrap());
+            let writer = BufWriter::new(sender);
+            let mut channel = TrackChannel::new(reader, writer);
+            channel.write_bytes(&message).unwrap();
+        });
+
+        // Evaluator
+        let reader = BufReader::new(receiver.try_clone().unwrap());
+        let writer = BufWriter::new(receiver);
+        let mut channel = TrackChannel::new(reader, writer);
+        let res = channel.read_vec(message_clone.len()).unwrap();
+        handle.join().unwrap();
+        assert_eq!(message_clone, res);
+    }
+
+    #[test]
     #[ignore]
     fn plain_circuit() {
         // network setup
