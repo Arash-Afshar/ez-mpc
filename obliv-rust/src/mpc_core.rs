@@ -1,4 +1,5 @@
 use rand_core::{CryptoRng, RngCore};
+use scuttlebutt::Block;
 use serde::{Deserialize, Serialize};
 use std::marker::{PhantomData, Sized};
 
@@ -59,6 +60,14 @@ impl Key {
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct PlainBit(pub u8);
 
+impl PlainBit {
+    pub fn to_block(&self) -> Block {
+        let mut value = [0; 16];
+        value[15] = self.0;
+        Block::from(value)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct GarbledBit(pub Key);
 
@@ -93,20 +102,23 @@ impl<M: GarblingMode, W: Wire> GarblingWire<M, W> {
 
     /// TODO: change the type of value W::ValueType
     pub fn encode(self, value: u8) -> EvaluatingWire<M> {
-        let mask = 2u8.pow(W::bits() - 1);
-        let bit_value = (0..W::bits())
-            .into_iter()
-            .map(|index| (value & (mask >> index)) == 0)
-            .collect::<Vec<bool>>();
         EvaluatingWire {
             bits: self
                 .bits
                 .into_iter()
-                .zip(bit_value)
+                .zip(to_bit_arr(value, W::bits()))
                 .map(|((zero, one), choice)| if choice { zero } else { one })
                 .collect::<Vec<M>>(),
         }
     }
+}
+
+fn to_bit_arr(value: u8, len: u32) -> Vec<bool> {
+    let mask = 2u8.pow(len - 1);
+    (0..len)
+        .into_iter()
+        .map(|index| (value & (mask >> index)) == 0)
+        .collect::<Vec<bool>>()
 }
 
 fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
@@ -473,11 +485,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn plain_circuit_with_ot() {
         // network setup
         let (sender, receiver) = UnixStream::pair().unwrap();
         let handle = std::thread::spawn(move || {
-            let mut rng = StdRng::from_seed(SEED);
+            let mut rng = AesRng::new();
 
             // Garbler
             let reader = BufReader::new(sender.try_clone().unwrap());
@@ -485,6 +498,8 @@ mod tests {
             let mut channel = TrackChannel::new(reader, writer);
             let _ = channel.write_usize(6).unwrap();
             // ------------------ Start of the Garbler
+            let mut ot = ChouOrlandiSender::init(&mut channel, &mut rng).unwrap();
+
             let alice = Party { id: 1 };
             let bob = Party { id: 2 };
             let protocol = Protocol {
@@ -507,9 +522,14 @@ mod tests {
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
 
-            // TODO: After OT: // assign!(b1 <- party 2);
-            // TODO: After OT: let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            // TODO: After OT: // TODO run OT
+            // assign!(b1 <- party 2);
+            let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let blocks = b1
+                .bits
+                .into_iter()
+                .map(|bit| (bit.0.to_block(), bit.1.to_block()))
+                .collect::<Vec<(Block, Block)>>();
+            ot.send(&mut channel, &blocks, &mut rng).unwrap();
 
             // TODO: After OT: // assign!(b2 <- party 2);
             // TODO: After OT: let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
@@ -535,6 +555,7 @@ mod tests {
         });
 
         // Evaluator
+        let mut rng = AesRng::new();
         let reader = BufReader::new(receiver.try_clone().unwrap());
         let writer = BufWriter::new(receiver);
         let mut channel = TrackChannel::new(reader, writer);
@@ -557,9 +578,14 @@ mod tests {
         let ser = channel.read_vec(size).unwrap();
         let a2: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
 
-        // TODO: After OT: // assign!(b1 <- party 2, value 300);
-        // TODO: After OT: // TODO run OT and receive the garbled value
-        // TODO: After OT: let b1 = EvaluatingWire { bits: vec![] };
+        // assign!(b1 <- party 2, value 255);
+        let mut otext = ChouOrlandiReceiver::init(&mut channel, &mut rng).unwrap();
+        let bs = to_bit_arr(255, 8);
+        //let results = otext.receive(&mut channel, &bs, &mut rng).unwrap();
+        //let b1_bits = results
+        //    .into_iter()
+        //    .map(|block| if block == 0 { PlainBit(0) } else { PlainBit(1) })
+        //    .collect::<Vec<PlainBit>>();
 
         // TODO: After OT: // assign!(b2 <- party 2, value 400);
         // TODO: After OT: // TODO run OT and receive the garbled value
