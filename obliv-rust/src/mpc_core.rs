@@ -29,6 +29,7 @@ pub trait GarblingMode {
     fn pair<R: RngCore + CryptoRng>(rng: &mut R) -> (Self, Self)
     where
         Self: Sized;
+    fn to_block(&self) -> Block;
 }
 
 pub trait Wire {
@@ -46,40 +47,37 @@ impl Wire for Wire8Bit {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Copy, Serialize, Deserialize)]
-pub struct Key([u8; 32]);
-
-impl Key {
-    fn new<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        let mut key = [0u8; 32];
-        rng.fill_bytes(&mut key);
-        Self(key)
-    }
-}
-
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
-pub struct PlainBit(pub u8);
-
-impl PlainBit {
-    pub fn to_block(&self) -> Block {
-        let mut value = [0; 16];
-        value[15] = self.0;
-        Block::from(value)
-    }
-}
+pub struct PlainBit(pub Block);
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
-pub struct GarbledBit(pub Key);
+pub struct GarbledBit(pub Block);
 
 impl GarblingMode for PlainBit {
     fn pair<R: RngCore + CryptoRng>(_rng: &mut R) -> (Self, Self) {
-        (Self(0), Self(1))
+        (Self(Block::default()), Self(Block::default().set_lsb()))
+    }
+
+    fn to_block(&self) -> Block {
+        self.0
     }
 }
 
 impl GarblingMode for GarbledBit {
     fn pair<R: RngCore + CryptoRng>(rng: &mut R) -> (Self, Self) {
-        (Self(Key::new(rng)), Self(Key::new(rng)))
+        let mut buffer: [u8; 16] = [0; 16];
+        rng.fill_bytes(&mut buffer);
+        let zero = Block::from(buffer);
+
+        buffer = [0; 16];
+        rng.fill_bytes(&mut buffer);
+        let one = Block::from(buffer);
+
+        (Self(zero), Self(one))
+    }
+
+    fn to_block(&self) -> Block {
+        self.0
     }
 }
 
@@ -111,6 +109,13 @@ impl<M: GarblingMode, W: Wire> GarblingWire<M, W> {
                 .collect::<Vec<M>>(),
         }
     }
+
+    pub fn to_blocks(self) -> Vec<(Block, Block)> {
+        self.bits
+            .into_iter()
+            .map(|(zero, one)| (zero.to_block(), one.to_block()))
+            .collect()
+    }
 }
 
 fn to_bit_arr(value: u8, len: u32) -> Vec<bool> {
@@ -127,7 +132,8 @@ fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
         .iter()
         .rev()
         .fold((0, 0), |(acc, idx), p_bit| {
-            (acc + 2u8.pow(idx) * p_bit.0, idx + 1)
+            let bit = if p_bit.0 == Block::default() { 0 } else { 1 };
+            (acc + 2u8.pow(idx) * bit, idx + 1)
         })
         .0
 }
@@ -222,7 +228,7 @@ mod tests {
     use super::*;
     use ocelot::ot::{ChouOrlandiReceiver, ChouOrlandiSender, Receiver, Sender};
     use rand::{rngs::StdRng, SeedableRng};
-    use scuttlebutt::{AbstractChannel, AesHash, AesRng, Block, TrackChannel};
+    use scuttlebutt::{AbstractChannel, AesRng, Block, TrackChannel};
     use std::{
         io::{BufReader, BufWriter},
         os::unix::net::UnixStream,
@@ -239,7 +245,7 @@ mod tests {
         let got = garbled_value
             .bits
             .into_iter()
-            .map(|g_bit| g_bit.0)
+            .map(|g_bit| if g_bit.0 == Block::default() { 0 } else { 1 })
             .collect::<Vec<u8>>();
         assert_eq!(expect, got);
     }
@@ -290,7 +296,7 @@ mod tests {
             .bits
             .into_iter()
             .map(|g_bit| g_bit.0)
-            .collect::<Vec<Key>>();
+            .collect::<Vec<Block>>();
         assert_eq!(expect, got);
     }
 
@@ -299,9 +305,9 @@ mod tests {
         let mut rng = StdRng::from_seed(SEED);
 
         let garbled_wires = GarblingWire::<GarbledBit, Wire8Bit>::new(&mut rng);
-        let serialized_garbled_wires = serde_json::to_vec(&garbled_wires).unwrap();
+        let serialized_garbled_wires = bincode::serialize(&garbled_wires).unwrap();
         let deserialized_garbled_wires: GarblingWire<GarbledBit, Wire8Bit> =
-            serde_json::from_slice(&serialized_garbled_wires).unwrap();
+            bincode::deserialize(&serialized_garbled_wires).unwrap();
 
         assert!(garbled_wires
             .clone()
@@ -317,9 +323,9 @@ mod tests {
 
         let garbled_wires = GarblingWire::<GarbledBit, Wire8Bit>::new(&mut rng);
         let garbled_value = garbled_wires.encode(6);
-        let serialized_garbled_value = serde_json::to_vec(&garbled_value).unwrap();
+        let serialized_garbled_value = bincode::serialize(&garbled_value).unwrap();
         let deserialized_garbled_value: EvaluatingWire<GarbledBit> =
-            serde_json::from_slice(&serialized_garbled_value).unwrap();
+            bincode::deserialize(&serialized_garbled_value).unwrap();
         assert!(garbled_value
             .clone()
             .bits
@@ -337,9 +343,9 @@ mod tests {
             output: garbled_wires,
         };
 
-        let serialized_gate = serde_json::to_vec(&gate).unwrap();
+        let serialized_gate = bincode::serialize(&gate).unwrap();
         let deserialized_gate: Gate<GarbledBit, Wire8Bit> =
-            serde_json::from_slice(&serialized_gate).unwrap();
+            bincode::deserialize(&serialized_gate).unwrap();
         assert!(gate
             .clone()
             .output
@@ -358,9 +364,9 @@ mod tests {
             output: garbled_wires,
         };
 
-        let serialized_gate = serde_json::to_vec(&gate).unwrap();
+        let serialized_gate = bincode::serialize(&gate).unwrap();
         let deserialized_gate: Gate<PlainBit, Wire8Bit> =
-            serde_json::from_slice(&serialized_gate).unwrap();
+            bincode::deserialize(&serialized_gate).unwrap();
         assert!(gate
             .clone()
             .output
@@ -417,20 +423,20 @@ mod tests {
             // assign!(a1 <- party 1, value 100);
             let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
             let garbled_value_a1 = a1.clone().encode(100);
-            let ser = serde_json::to_vec(&garbled_value_a1).unwrap();
+            let ser = bincode::serialize(&garbled_value_a1).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
 
             // assign!(a2 <- party 1, value 200);
             let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
             let garbled_value_a2 = a2.clone().encode(50);
-            let ser = serde_json::to_vec(&garbled_value_a2).unwrap();
+            let ser = bincode::serialize(&garbled_value_a2).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
 
             // obliv!(g = a1 + a2);
             let (_, gates) = garble_u8_gate_plain(a1, a2, Operation::AddU8);
-            let ser = serde_json::to_vec(&gates).unwrap();
+            let ser = bincode::serialize(&gates).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
 
@@ -455,17 +461,17 @@ mod tests {
         // assign!(a1 <- party 1);
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
-        let a1: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
+        let a1: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
 
         // assign!(a2 <- party 1);
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
-        let a2: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
+        let a2: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
 
         // obliv!(g = a1 + a2);
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
-        let gates: Vec<Gate<PlainBit, Wire8Bit>> = serde_json::from_slice(&ser).unwrap();
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
         let g = evaluate_plain(a1, a2, Operation::AddU8, gates);
 
         // reveal!(g);
@@ -485,7 +491,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn plain_circuit_with_ot() {
         // network setup
         let (sender, receiver) = UnixStream::pair().unwrap();
@@ -511,25 +516,20 @@ mod tests {
             // assign!(a1 <- party 1, value 100);
             let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
             let garbled_value_a1 = a1.clone().encode(100);
-            let ser = serde_json::to_vec(&garbled_value_a1).unwrap();
+            let ser = bincode::serialize(&garbled_value_a1).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
 
             // assign!(a2 <- party 1, value 200);
             let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
             let garbled_value_a2 = a2.clone().encode(50);
-            let ser = serde_json::to_vec(&garbled_value_a2).unwrap();
+            let ser = bincode::serialize(&garbled_value_a2).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
 
             // assign!(b1 <- party 2);
             let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            let blocks = b1
-                .bits
-                .into_iter()
-                .map(|bit| (bit.0.to_block(), bit.1.to_block()))
-                .collect::<Vec<(Block, Block)>>();
-            ot.send(&mut channel, &blocks, &mut rng).unwrap();
+            ot.send(&mut channel, &b1.to_blocks(), &mut rng).unwrap();
 
             // TODO: After OT: // assign!(b2 <- party 2);
             // TODO: After OT: let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
@@ -571,21 +571,22 @@ mod tests {
         // assign!(a1 <- party 1);
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
-        let a1: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
+        let a1: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
 
         // assign!(a2 <- party 1);
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
-        let a2: EvaluatingWire<PlainBit> = serde_json::from_slice(&ser).unwrap();
+        let a2: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
 
         // assign!(b1 <- party 2, value 255);
-        let mut otext = ChouOrlandiReceiver::init(&mut channel, &mut rng).unwrap();
+        let mut ot = ChouOrlandiReceiver::init(&mut channel, &mut rng).unwrap();
         let bs = to_bit_arr(255, 8);
-        //let results = otext.receive(&mut channel, &bs, &mut rng).unwrap();
-        //let b1_bits = results
-        //    .into_iter()
-        //    .map(|block| if block == 0 { PlainBit(0) } else { PlainBit(1) })
-        //    .collect::<Vec<PlainBit>>();
+        let results = ot.receive(&mut channel, &bs, &mut rng).unwrap();
+        let b1_bits = results
+            .into_iter()
+            .map(|block| PlainBit(block))
+            .collect::<Vec<PlainBit>>();
+        let b1 = EvaluatingWire::<PlainBit> { bits: b1_bits };
 
         // TODO: After OT: // assign!(b2 <- party 2, value 400);
         // TODO: After OT: // TODO run OT and receive the garbled value
