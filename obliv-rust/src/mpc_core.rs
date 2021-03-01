@@ -410,7 +410,6 @@ mod tests {
             let reader = BufReader::new(sender.try_clone().unwrap());
             let writer = BufWriter::new(sender);
             let mut channel = TrackChannel::new(reader, writer);
-            let _ = channel.write_usize(6).unwrap();
             // ------------------ Start of the Garbler
             let alice = Party { id: 1 };
             let bob = Party { id: 2 };
@@ -449,7 +448,6 @@ mod tests {
         let reader = BufReader::new(receiver.try_clone().unwrap());
         let writer = BufWriter::new(receiver);
         let mut channel = TrackChannel::new(reader, writer);
-        println!("-------------- Received: {}", channel.read_usize().unwrap());
         // ------------------ Start of evaluator
         let alice = Party { id: 1 };
         let bob = Party { id: 2 };
@@ -491,20 +489,17 @@ mod tests {
     }
 
     #[test]
-    fn plain_circuit_with_ot() {
-        // network setup
+    fn test_plain_circuit_with_ot() {
         let (sender, receiver) = UnixStream::pair().unwrap();
         let handle = std::thread::spawn(move || {
-            let mut rng = AesRng::new();
-
             // Garbler
+            let mut rng = AesRng::new();
             let reader = BufReader::new(sender.try_clone().unwrap());
             let writer = BufWriter::new(sender);
             let mut channel = TrackChannel::new(reader, writer);
-            let _ = channel.write_usize(6).unwrap();
-            // ------------------ Start of the Garbler
             let mut ot = ChouOrlandiSender::init(&mut channel, &mut rng).unwrap();
 
+            // ------------------ Start of the Garbler
             let alice = Party { id: 1 };
             let bob = Party { id: 2 };
             let protocol = Protocol {
@@ -519,6 +514,7 @@ mod tests {
             let ser = bincode::serialize(&garbled_value_a1).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
+            channel.flush().unwrap();
 
             // assign!(a2 <- party 1, value 200);
             let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
@@ -526,6 +522,7 @@ mod tests {
             let ser = bincode::serialize(&garbled_value_a2).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
+            channel.flush().unwrap();
 
             // assign!(b1 <- party 2);
             let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
@@ -553,14 +550,14 @@ mod tests {
             // TODO: After OT: // TODO send(gates.mapping);
             // TODO: After OT: // TODO receive(plain_e);
         });
-
-        // Evaluator
         let mut rng = AesRng::new();
         let reader = BufReader::new(receiver.try_clone().unwrap());
         let writer = BufWriter::new(receiver);
         let mut channel = TrackChannel::new(reader, writer);
-        println!("-------------- Received: {}", channel.read_usize().unwrap());
+        let mut ot = ChouOrlandiReceiver::init(&mut channel, &mut rng).unwrap();
+
         // ------------------ Start of evaluator
+
         let alice = Party { id: 1 };
         let bob = Party { id: 2 };
         let protocol = Protocol {
@@ -568,6 +565,7 @@ mod tests {
             me: bob,
             role: Role::Evaluator,
         };
+
         // assign!(a1 <- party 1);
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
@@ -579,7 +577,6 @@ mod tests {
         let a2: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
 
         // assign!(b1 <- party 2, value 255);
-        let mut ot = ChouOrlandiReceiver::init(&mut channel, &mut rng).unwrap();
         let bs = to_bit_arr(255, 8);
         let results = ot.receive(&mut channel, &bs, &mut rng).unwrap();
         let b1_bits = results
@@ -612,13 +609,5 @@ mod tests {
         // TODO: After OT: // TODO receive(plain_e);
 
         handle.join().unwrap();
-        println!(
-            "Receiver communication (read): {:.2} Mb",
-            channel.kilobits_read() / 1000.0
-        );
-        println!(
-            "Receiver communication (write): {:.2} Mb",
-            channel.kilobits_written() / 1000.0
-        );
     }
 }
