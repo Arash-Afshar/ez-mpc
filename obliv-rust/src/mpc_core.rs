@@ -105,7 +105,7 @@ impl<M: GarblingMode, W: Wire> GarblingWire<M, W> {
                 .bits
                 .into_iter()
                 .zip(to_bit_arr(value, W::bits()))
-                .map(|((zero, one), choice)| if choice { zero } else { one })
+                .map(|((zero, one), choice)| if choice { one } else { zero })
                 .collect::<Vec<M>>(),
         }
     }
@@ -122,7 +122,7 @@ fn to_bit_arr(value: u8, len: u32) -> Vec<bool> {
     let mask = 2u8.pow(len - 1);
     (0..len)
         .into_iter()
-        .map(|index| (value & (mask >> index)) == 0)
+        .map(|index| (value & (mask >> index)) != 0)
         .collect::<Vec<bool>>()
 }
 
@@ -419,16 +419,16 @@ mod tests {
                 role: Role::Garbler,
             };
 
-            // assign!(a1 <- party 1, value 100);
+            // assign!(a1 <- party 1, value 10);
             let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            let garbled_value_a1 = a1.clone().encode(100);
+            let garbled_value_a1 = a1.clone().encode(10);
             let ser = bincode::serialize(&garbled_value_a1).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
 
-            // assign!(a2 <- party 1, value 200);
+            // assign!(a2 <- party 1, value 20);
             let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            let garbled_value_a2 = a2.clone().encode(50);
+            let garbled_value_a2 = a2.clone().encode(20);
             let ser = bincode::serialize(&garbled_value_a2).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
@@ -475,7 +475,7 @@ mod tests {
         // reveal!(g);
         // TODO receive decoding and decode.
         let plain_g = to_u8(&g);
-        assert_eq!(plain_g, 150);
+        assert_eq!(plain_g, 30);
 
         handle.join().unwrap();
         println!(
@@ -508,17 +508,17 @@ mod tests {
                 role: Role::Garbler,
             };
 
-            // assign!(a1 <- party 1, value 100);
+            // assign!(a1 <- party 1, value 10);
             let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            let garbled_value_a1 = a1.clone().encode(100);
+            let garbled_value_a1 = a1.clone().encode(10);
             let ser = bincode::serialize(&garbled_value_a1).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
             channel.flush().unwrap();
 
-            // assign!(a2 <- party 1, value 200);
+            // assign!(a2 <- party 1, value 20);
             let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            let garbled_value_a2 = a2.clone().encode(50);
+            let garbled_value_a2 = a2.clone().encode(20);
             let ser = bincode::serialize(&garbled_value_a2).unwrap();
             channel.write_usize(ser.len()).unwrap();
             channel.write_bytes(&ser).unwrap();
@@ -526,29 +526,40 @@ mod tests {
 
             // assign!(b1 <- party 2);
             let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            ot.send(&mut channel, &b1.to_blocks(), &mut rng).unwrap();
+            ot.send(&mut channel, &b1.clone().to_blocks(), &mut rng)
+                .unwrap();
 
-            // TODO: After OT: // assign!(b2 <- party 2);
-            // TODO: After OT: let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            // TODO: After OT: // TODO run OT
+            // assign!(b2 <- party 2);
+            let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            ot.send(&mut channel, &b2.clone().to_blocks(), &mut rng)
+                .unwrap();
 
-            // TODO: After OT: // -------------------------- Proceed to garbling deeper layers next.
+            // -------------------------- Proceed to garbling deeper layers next.
 
-            // TODO: After OT: // obliv!(c = a1 + b1);
-            // TODO: After OT: let (c, gates) = garble_u8_gate_plain(a1, b1, Operation::AddU8);
-            // TODO: After OT: // TODO send(gates);
+            // obliv!(c = a1 + b1);
+            let (c, gates) = garble_u8_gate_plain(a1, b1, Operation::AddU8);
+            let ser = bincode::serialize(&gates).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
+            channel.flush().unwrap();
 
-            // TODO: After OT: // obliv!(d = a2 + b2);
-            // TODO: After OT: let (d, gates) = garble_u8_gate_plain(a2, b2, Operation::AddU8);
-            // TODO: After OT: // TODO send(gates);
+            // obliv!(d = a2 + b2);
+            let (d, gates) = garble_u8_gate_plain(a2, b2, Operation::AddU8);
+            let ser = bincode::serialize(&gates).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
+            channel.flush().unwrap();
 
-            // TODO: After OT: // obliv!(e = c * d);
-            // TODO: After OT: let (e, gates) = garble_u8_gate_plain(c, d, Operation::MulU8);
-            // TODO: After OT: // TODO send(gates);
+            // obliv!(e = c * d);
+            let (e, gates) = garble_u8_gate_plain(c, d, Operation::AddU8);
+            let ser = bincode::serialize(&gates).unwrap();
+            channel.write_usize(ser.len()).unwrap();
+            channel.write_bytes(&ser).unwrap();
+            channel.flush().unwrap();
 
-            // TODO: After OT: // reveal!(e);
-            // TODO: After OT: // TODO send(gates.mapping);
-            // TODO: After OT: // TODO receive(plain_e);
+            //// reveal!(e);
+            //// TODO send(gates.mapping);
+            //// TODO receive(plain_e);
         });
         let mut rng = AesRng::new();
         let reader = BufReader::new(receiver.try_clone().unwrap());
@@ -570,43 +581,59 @@ mod tests {
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
         let a1: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
+        assert_eq!(to_u8(&a1), 10, "a1");
 
         // assign!(a2 <- party 1);
         let size = channel.read_usize().unwrap();
         let ser = channel.read_vec(size).unwrap();
         let a2: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
+        assert_eq!(to_u8(&a2), 20, "a2");
 
-        // assign!(b1 <- party 2, value 255);
-        let bs = to_bit_arr(255, 8);
+        // assign!(b1 <- party 2, value 25);
+        let bs = to_bit_arr(25, 8);
         let results = ot.receive(&mut channel, &bs, &mut rng).unwrap();
-        let b1_bits = results
+        let bits = results
             .into_iter()
             .map(|block| PlainBit(block))
             .collect::<Vec<PlainBit>>();
-        let b1 = EvaluatingWire::<PlainBit> { bits: b1_bits };
+        let b1 = EvaluatingWire::<PlainBit> { bits };
+        println!("{:?}", bs);
+        assert_eq!(to_u8(&b1), 25, "b1");
 
-        // TODO: After OT: // assign!(b2 <- party 2, value 400);
-        // TODO: After OT: // TODO run OT and receive the garbled value
-        // TODO: After OT: let b2 = EvaluatingWire { bits: vec![] };
+        // assign!(b2 <- party 2, value 30);
+        let bs = to_bit_arr(30, 8);
+        let results = ot.receive(&mut channel, &bs, &mut rng).unwrap();
+        let bits = results
+            .into_iter()
+            .map(|block| PlainBit(block))
+            .collect::<Vec<PlainBit>>();
+        let b2 = EvaluatingWire::<PlainBit> { bits };
+        assert_eq!(to_u8(&b2), 30, "b2");
 
-        // TODO: After OT: // obliv!(c = a1 + b1);
-        // TODO: After OT: // TODO receive(gates);
-        // TODO: After OT: let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
-        // TODO: After OT: let c = evaluate_plain(a1, b1, Operation::AddU8, gates);
+        // obliv!(c = a1 + b1);
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
+        let c = evaluate_plain(a1, b1, Operation::AddU8, gates);
+        assert_eq!(to_u8(&c), 35, "c");
 
-        // TODO: After OT: // obliv!(d = a2 + b2);
-        // TODO: After OT: // TODO receive(gates);
-        // TODO: After OT: let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
-        // TODO: After OT: let d = evaluate_plain(a2, b2, Operation::AddU8, gates);
+        // obliv!(d = a2 + b2);
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
+        let d = evaluate_plain(a2, b2, Operation::AddU8, gates);
+        assert_eq!(to_u8(&d), 50, "d");
 
-        // TODO: After OT: // obliv!(e = c * d);
-        // TODO: After OT: let gates: Vec<Gate<PlainBit, Wire8Bit>> = vec![];
-        // TODO: After OT: let e = evaluate_plain(c, d, Operation::MulU8, gates);
-        // TODO: After OT: // TODO receive(gates);
+        // obliv!(e = c * d);
+        let size = channel.read_usize().unwrap();
+        let ser = channel.read_vec(size).unwrap();
+        let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
+        let e = evaluate_plain(c, d, Operation::AddU8, gates);
+        assert_eq!(to_u8(&e), 85, "e");
 
-        // TODO: After OT: // reveal!(e);
-        // TODO: After OT: // TODO send(gates.mapping);
-        // TODO: After OT: // TODO receive(plain_e);
+        //// reveal!(e);
+        //// TODO send(gates.mapping);
+        //// TODO receive(plain_e);
 
         handle.join().unwrap();
     }
