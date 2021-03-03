@@ -4,7 +4,7 @@ use crate::mpc_core::Wire;
 use serde::{Deserialize, Serialize};
 
 /// A wire that represents a `u8` value.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Wire8Bit {}
 
 impl Wire for Wire8Bit {

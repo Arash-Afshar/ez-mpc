@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 // ----------------------------------------------------------------------------------------------
 
 /// Implements a plain key where the zero-key is always 0 and the one-key is always 1.
-#[derive(Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct PlainBit(pub Block);
 
 impl GarblingMode for PlainBit {
@@ -104,7 +104,7 @@ fn evaluate_mul_u8_plain_scheme(
     input_1
 }
 
-fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
+pub(crate) fn to_u8(garbled_value: &EvaluatingWire<PlainBit>) -> u8 {
     garbled_value
         .bits
         .iter()
@@ -221,40 +221,42 @@ mod tests {
         // network setup
         let (sender, receiver) = UnixStream::pair().unwrap();
         let handle = std::thread::spawn(move || {
-            let mut rng = StdRng::from_seed(SEED);
+            let rng = StdRng::from_seed(SEED);
 
             // Garbler
             let reader = BufReader::new(sender.try_clone().unwrap());
             let writer = BufWriter::new(sender);
-            let mut channel = TrackChannel::new(reader, writer);
+            let channel = TrackChannel::new(reader, writer);
             // ------------------ Start of the Garbler
             let alice = Party { id: 1 };
             let bob = Party { id: 2 };
-            let _protocol = Protocol {
+            let mut protocol = Protocol {
                 parties: vec![alice.clone(), bob],
                 me: alice,
                 role: Role::Garbler,
+                channel,
+                rng,
             };
 
             // assign!(a1 <- party 1, value 10);
-            let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut protocol.rng);
             let garbled_value_a1 = a1.clone().encode(10);
             let ser = bincode::serialize(&garbled_value_a1).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
 
             // assign!(a2 <- party 1, value 20);
-            let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut protocol.rng);
             let garbled_value_a2 = a2.clone().encode(20);
             let ser = bincode::serialize(&garbled_value_a2).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
 
             // obliv!(g = a1 + a2);
             let (_, gates) = garble_u8_gate_plain(a1, a2, Operation::AddU8);
             let ser = bincode::serialize(&gates).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
 
             // reveal!(g);
             // TODO: send decoding
@@ -264,28 +266,31 @@ mod tests {
         // Evaluator
         let reader = BufReader::new(receiver.try_clone().unwrap());
         let writer = BufWriter::new(receiver);
-        let mut channel = TrackChannel::new(reader, writer);
+        let channel = TrackChannel::new(reader, writer);
+        let rng = StdRng::from_seed(SEED);
         // ------------------ Start of evaluator
         let alice = Party { id: 1 };
         let bob = Party { id: 2 };
-        let _protocol = Protocol {
+        let mut protocol = Protocol {
             parties: vec![alice, bob.clone()],
             me: bob,
             role: Role::Evaluator,
+            channel,
+            rng,
         };
         // assign!(a1 <- party 1);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let a1: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
 
         // assign!(a2 <- party 1);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let a2: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
 
         // obliv!(g = a1 + a2);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
         let g = evaluate_plain(a1, a2, Operation::AddU8, gates);
 
@@ -297,11 +302,11 @@ mod tests {
         handle.join().unwrap();
         println!(
             "Receiver communication (read): {:.2} Mb",
-            channel.kilobits_read() / 1000.0
+            protocol.channel.kilobits_read() / 1000.0
         );
         println!(
             "Receiver communication (write): {:.2} Mb",
-            channel.kilobits_written() / 1000.0
+            protocol.channel.kilobits_written() / 1000.0
         );
     }
 
@@ -310,105 +315,119 @@ mod tests {
         let (sender, receiver) = UnixStream::pair().unwrap();
         let handle = std::thread::spawn(move || {
             // Garbler
-            let mut rng = AesRng::new();
+            let rng = AesRng::new();
             let reader = BufReader::new(sender.try_clone().unwrap());
             let writer = BufWriter::new(sender);
-            let mut channel = TrackChannel::new(reader, writer);
-            let mut ot = ChouOrlandiSender::init(&mut channel, &mut rng).unwrap();
+            let channel = TrackChannel::new(reader, writer);
 
             // ------------------ Start of the Garbler
             let alice = Party { id: 1 };
             let bob = Party { id: 2 };
-            let _protocol = Protocol {
+            let mut protocol = Protocol {
                 parties: vec![alice.clone(), bob],
                 me: alice,
                 role: Role::Garbler,
+                channel,
+                rng,
             };
+            let mut ot = ChouOrlandiSender::init(&mut protocol.channel, &mut protocol.rng).unwrap();
 
             // assign!(a1 <- party 1, value 10);
-            let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let a1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut protocol.rng);
             let garbled_value_a1 = a1.clone().encode(10);
             let ser = bincode::serialize(&garbled_value_a1).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
-            channel.flush().unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
+            protocol.channel.flush().unwrap();
 
             // assign!(a2 <- party 1, value 20);
-            let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
+            let a2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut protocol.rng);
             let garbled_value_a2 = a2.clone().encode(20);
             let ser = bincode::serialize(&garbled_value_a2).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
-            channel.flush().unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
+            protocol.channel.flush().unwrap();
 
             // assign!(b1 <- party 2);
-            let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            ot.send(&mut channel, &b1.clone().to_blocks(), &mut rng)
-                .unwrap();
+            let b1 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut protocol.rng);
+            ot.send(
+                &mut protocol.channel,
+                &b1.clone().to_blocks(),
+                &mut protocol.rng,
+            )
+            .unwrap();
 
             // assign!(b2 <- party 2);
-            let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut rng);
-            ot.send(&mut channel, &b2.clone().to_blocks(), &mut rng)
-                .unwrap();
+            let b2 = GarblingWire::<PlainBit, Wire8Bit>::new(&mut protocol.rng);
+            ot.send(
+                &mut protocol.channel,
+                &b2.clone().to_blocks(),
+                &mut protocol.rng,
+            )
+            .unwrap();
 
             // -------------------------- Proceed to garbling deeper layers next.
 
             // obliv!(c = a1 + b1);
             let (c, gates) = garble_u8_gate_plain(a1, b1, Operation::AddU8);
             let ser = bincode::serialize(&gates).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
-            channel.flush().unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
+            protocol.channel.flush().unwrap();
 
             // obliv!(d = a2 + b2);
             let (d, gates) = garble_u8_gate_plain(a2, b2, Operation::AddU8);
             let ser = bincode::serialize(&gates).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
-            channel.flush().unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
+            protocol.channel.flush().unwrap();
 
             // obliv!(e = c * d);
             let (_e, gates) = garble_u8_gate_plain(c, d, Operation::AddU8);
             let ser = bincode::serialize(&gates).unwrap();
-            channel.write_usize(ser.len()).unwrap();
-            channel.write_bytes(&ser).unwrap();
-            channel.flush().unwrap();
+            protocol.channel.write_usize(ser.len()).unwrap();
+            protocol.channel.write_bytes(&ser).unwrap();
+            protocol.channel.flush().unwrap();
 
             //// reveal!(e);
             //// TODO send(gates.mapping);
             //// TODO receive(plain_e);
         });
-        let mut rng = AesRng::new();
+        let rng = AesRng::new();
         let reader = BufReader::new(receiver.try_clone().unwrap());
         let writer = BufWriter::new(receiver);
-        let mut channel = TrackChannel::new(reader, writer);
-        let mut ot = ChouOrlandiReceiver::init(&mut channel, &mut rng).unwrap();
+        let channel = TrackChannel::new(reader, writer);
 
         // ------------------ Start of evaluator
 
         let alice = Party { id: 1 };
         let bob = Party { id: 2 };
-        let _protocol = Protocol {
+        let mut protocol = Protocol {
             parties: vec![alice, bob.clone()],
             me: bob,
             role: Role::Evaluator,
+            channel,
+            rng,
         };
+        let mut ot = ChouOrlandiReceiver::init(&mut protocol.channel, &mut protocol.rng).unwrap();
 
         // assign!(a1 <- party 1);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let a1: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
         assert_eq!(to_u8(&a1), 10, "a1");
 
         // assign!(a2 <- party 1);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let a2: EvaluatingWire<PlainBit> = bincode::deserialize(&ser).unwrap();
         assert_eq!(to_u8(&a2), 20, "a2");
 
         // assign!(b1 <- party 2, value 25);
         let bs = to_bit_arr(25, 8);
-        let results = ot.receive(&mut channel, &bs, &mut rng).unwrap();
+        let results = ot
+            .receive(&mut protocol.channel, &bs, &mut protocol.rng)
+            .unwrap();
         let bits = results
             .into_iter()
             .map(|block| PlainBit(block))
@@ -419,7 +438,9 @@ mod tests {
 
         // assign!(b2 <- party 2, value 30);
         let bs = to_bit_arr(30, 8);
-        let results = ot.receive(&mut channel, &bs, &mut rng).unwrap();
+        let results = ot
+            .receive(&mut protocol.channel, &bs, &mut protocol.rng)
+            .unwrap();
         let bits = results
             .into_iter()
             .map(|block| PlainBit(block))
@@ -428,22 +449,22 @@ mod tests {
         assert_eq!(to_u8(&b2), 30, "b2");
 
         // obliv!(c = a1 + b1);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
         let c = evaluate_plain(a1, b1, Operation::AddU8, gates);
         assert_eq!(to_u8(&c), 35, "c");
 
         // obliv!(d = a2 + b2);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
         let d = evaluate_plain(a2, b2, Operation::AddU8, gates);
         assert_eq!(to_u8(&d), 50, "d");
 
         // obliv!(e = c * d);
-        let size = channel.read_usize().unwrap();
-        let ser = channel.read_vec(size).unwrap();
+        let size = protocol.channel.read_usize().unwrap();
+        let ser = protocol.channel.read_vec(size).unwrap();
         let gates: Vec<Gate<PlainBit, Wire8Bit>> = bincode::deserialize(&ser).unwrap();
         let e = evaluate_plain(c, d, Operation::AddU8, gates);
         assert_eq!(to_u8(&e), 85, "e");
