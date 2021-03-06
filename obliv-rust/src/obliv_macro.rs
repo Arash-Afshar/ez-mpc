@@ -1,14 +1,4 @@
 //! This module implements the macros that will expand the `obliv` keyword into an MPC protocol.
-//!
-
-use crate::{
-    mpc_core::{
-        EvaluatingWire, GarblingMode, GarblingWire, Gate, Operation, Party, Protocol, Role, Wire,
-    },
-    plain_garbling::PlainBit,
-    wires::Wire8Bit,
-};
-use rand_core::{CryptoRng, RngCore};
 
 #[macro_export]
 macro_rules! obliv {
@@ -69,13 +59,12 @@ macro_rules! assign {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{
-        mpc_core::{EvaluatingWire, GarblingWire, Gate, Operation, Party, Protocol, Role},
-        plain_garbling::{evaluate_plain, garble_u8_gate_plain, to_u8, PlainBit},
+        mpc_core::{GarblingWire, Party, Protocol, Role},
+        plain_garbling::PlainBit,
         wires::Wire8Bit,
     };
-    use scuttlebutt::{AbstractChannel, AesRng, Channel, TrackChannel};
+    use scuttlebutt::{AbstractChannel, AesRng, Channel};
     use std::{
         io::{BufReader, BufWriter},
         os::unix::net::UnixStream,
@@ -84,7 +73,7 @@ mod tests {
     #[test]
     fn obliv_init() {
         let rng = AesRng::new();
-        let (sender, receiver) = UnixStream::pair().unwrap();
+        let (sender, _receiver) = UnixStream::pair().unwrap();
         let reader = BufReader::new(sender.try_clone().unwrap());
         let writer = BufWriter::new(sender);
         let channel = Channel::new(reader, writer);
