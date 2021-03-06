@@ -4,35 +4,20 @@ version = "0.1.0"
 authors = ["Arash Afshar <arash.afshar.edu@gmail.com>"]
 edition = "2018"
 
-
 [dependencies]
+bincode = "1.3.2"
+fancy-garbling = { git = "https://github.com/GaloisInc/swanky" }
+ocelot = { git = "https://github.com/GaloisInc/swanky" }
+rand_core = "0.5"
+rand = "0.7"
+serde = { version = "1.0.105", features = ["derive"] }
+scuttlebutt = { git = "https://github.com/GaloisInc/swanky", features = ["serde1"] }
+security_mode = { path = "../security_mode" }
 
-[dev-dependencies.criterion]
-version = "0.3"
+[dev-dependencies]
+criterion = "0.3"
 
 [[bench]]
 name = "obliv_macro"
 harness = false
 
-[dependencies.scuttlebutt]
-git = "https://github.com/GaloisInc/swanky"
-features = ["serde1"]
-                                                                                                         
-[dependencies.ocelot]
-git = "https://github.com/GaloisInc/swanky"
-                                                    
-[dependencies.fancy-garbling]
-git = "https://github.com/GaloisInc/swanky"
-
-[dependencies.rand_core]
-version = "0.5"
-
-[dependencies.rand]
-version = "0.7"
-
-[dependencies.serde]
-version = "1.0.105"
-features = ["derive"]
-
-[dependencies.bincode]
-version = "1.3.2"

@@ -2,7 +2,7 @@
 //! directly. Instead, the user will call the macros and the macros call these APIs.
 
 use rand_core::{CryptoRng, RngCore};
-use scuttlebutt::Block;
+use scuttlebutt::{AbstractChannel, Block};
 use serde::{Deserialize, Serialize};
 use std::marker::{PhantomData, Sized};
 
@@ -25,10 +25,12 @@ pub enum Role {
 }
 
 /// Stores metadata about the protocol. Specifically, the current party.
-pub struct Protocol {
+pub struct Protocol<C: AbstractChannel, R: RngCore + CryptoRng> {
     pub parties: Vec<Party>,
     pub me: Party,
     pub role: Role,
+    pub channel: C,
+    pub rng: R,
 }
 
 /// The operations that are supported by the protocol. Insead of focusing on 1-bit logic gates, the
@@ -59,7 +61,7 @@ pub trait Wire {
 }
 
 /// Represents a group of garbled wires defined by the garbling mode and the wire specificacion.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct GarblingWire<M: GarblingMode, W: Wire> {
     pub bits: Vec<(M, M)>,
     wire_info: PhantomData<W>,

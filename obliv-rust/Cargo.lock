@@ -433,6 +433,7 @@ dependencies = [
  "rand",
  "rand_core",
  "scuttlebutt",
+ "security_mode",
  "serde",
 ]
 
@@ -512,9 +513,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.8"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "991431c3519a3f36861882da93630ce66b52918dcf1b8e2fd66b397fc96f28df"
+checksum = "c3d0b9745dc2debf507c8422de05d7226cc1f0644216dfdfead988f9b1ab32a7"
 dependencies = [
  "proc-macro2",
 ]
@@ -652,6 +653,15 @@ dependencies = [
  "rand_core",
  "serde",
  "sha2",
+]
+
+[[package]]
+name = "security_mode"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
