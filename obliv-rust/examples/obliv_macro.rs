@@ -5,10 +5,12 @@ fn assign(_inp: u8, sec: &str) -> bool {
 }
 
 #[security_mode(AAA)]
-fn protocol() {
-    assign(1);
+fn protocol() -> bool {
+    let a = assign(1);
+    assign(2);
+    assign(3)
 }
 
 fn main() {
-    protocol()
+    protocol();
 }
