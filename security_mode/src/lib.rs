@@ -47,12 +47,12 @@ pub fn security_mode(attr: TokenStream, item: TokenStream) -> TokenStream {
                 attrs: vec![],
                 lit: syn::Lit::Str(syn::LitStr::new(&*security_mode, Span::call_site())),
             }));
-            syn::Expr::Call(syn::ExprCall {
+            syn::ExprCall {
                 attrs,
                 func: Box::new(func),
                 paren_token,
                 args,
-            })
+            }
         };
 
     let rewrite_semi = |attrs,
@@ -60,7 +60,10 @@ pub fn security_mode(attr: TokenStream, item: TokenStream) -> TokenStream {
                         paren_token,
                         args: syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
                         semi_colon: syn::token::Semi| {
-        syn::Stmt::Semi(rewrite_expr(attrs, func, paren_token, args), semi_colon)
+        syn::Stmt::Semi(
+            syn::Expr::Call(rewrite_expr(attrs, func, paren_token, args)),
+            semi_colon,
+        )
     };
 
     let modified_statements = item_ast
@@ -86,7 +89,7 @@ pub fn security_mode(attr: TokenStream, item: TokenStream) -> TokenStream {
                             paren_token,
                             args,
                         }) => {
-                            if find_target(func) {
+                            if find_target(func.clone()) {
                                 let modified_expr =
                                     syn::Expr::Call(rewrite_expr(attrs, func, paren_token, args));
                                 syn::Stmt::Local(syn::Local {
@@ -110,7 +113,12 @@ pub fn security_mode(attr: TokenStream, item: TokenStream) -> TokenStream {
                     args,
                 })) => {
                     if find_target(func.clone()) {
-                        syn::Stmt::Expr(rewrite_expr(attrs, func, paren_token, args))
+                        syn::Stmt::Expr(syn::Expr::Call(rewrite_expr(
+                            attrs,
+                            func,
+                            paren_token,
+                            args,
+                        )))
                     } else {
                         f
                     }
