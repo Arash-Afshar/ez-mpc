@@ -13,7 +13,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0btypes.proto\x12\x03\x61pi\"\x16\n\x06Scalar\x12\x0c\n\x04\x64\x61ta\x18\x01 \x03(\x0c\x42)Z\'github.com/ez-mpc/data-contract/v1;coreb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0btypes.proto\x12\x03\x61pi\"\x16\n\x06Scalar\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\x42)Z\'github.com/ez-mpc/data-contract/v1;coreb\x06proto3')
 
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, globals())
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'types_pb2', globals())

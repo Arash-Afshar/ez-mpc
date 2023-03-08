@@ -4,5 +4,7 @@ package api;
 option go_package = "github.com/ez-mpc/data-contract/v1;core";
 
 message Scalar {
-    repeated bytes data = 1;
+    // TODO: add note that this is Big Endian
+    bytes data = 1;
+    // TODO: add a new field for "sign"
 }
